@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./Christies.csv:/app/Christies.csv:ro
+      - ./ChristiesMAP.geojson:/app/ChristiesMAP.geojson:ro
+    restart: unless-stopped

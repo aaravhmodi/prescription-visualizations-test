@@ -1,0 +1,8 @@
+node_modules
+.next
+*.csv
+*.geojson
+.git
+.gitignore
+docker-compose.yml
+Dockerfile
