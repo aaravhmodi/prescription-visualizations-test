@@ -44,6 +44,15 @@ const NEEDED_COLS = [
   'TEX_RISK',
   'N_RESP',
   'YSIG',
+  // per-application-layer data for week filter
+  'L1_applied_nitrogen', 'L1_length',
+  'L2_applied_nitrogen', 'L2_length',
+  'L3_applied_nitrogen', 'L3_length',
+  'L4_applied_nitrogen', 'L4_length',
+  'L5_applied_nitrogen', 'L5_length',
+  'L6_applied_nitrogen', 'L6_length',
+  'L7_applied_nitrogen', 'L7_length',
+  'L8_applied_nitrogen', 'L8_length',
 ]
 
 export async function GET() {

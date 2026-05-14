@@ -15,6 +15,7 @@ const FieldMap = dynamic(() => import('@/components/FieldMap'), {
 
 export default function Home() {
   const [activeLayer, setActiveLayer] = useState('TOTAL_N_APPLIED_LB_AC')
+  const [weekFilter, setWeekFilter] = useState(0)
 
   return (
     <div className="h-full flex flex-col bg-gray-950">
@@ -37,8 +38,13 @@ export default function Home() {
 
       {/* Body */}
       <div className="flex-1 flex overflow-hidden">
-        <LayerSidebar activeLayer={activeLayer} onSelect={setActiveLayer} />
-        <FieldMap activeLayer={activeLayer} />
+        <LayerSidebar
+          activeLayer={activeLayer}
+          onSelect={setActiveLayer}
+          weekFilter={weekFilter}
+          onWeekFilter={setWeekFilter}
+        />
+        <FieldMap activeLayer={activeLayer} weekFilter={weekFilter} />
       </div>
     </div>
   )

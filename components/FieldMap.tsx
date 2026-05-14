@@ -17,6 +17,23 @@ interface FieldPoint {
 
 interface Props {
   activeLayer: string
+  weekFilter: number
+}
+
+function computeCumulativeN(pt: FieldPoint, weekIndex: number): number {
+  const totalN = pt['TOTAL_N_APPLIED_LB_AC'] as number
+  if (isNaN(totalN)) return NaN
+  let cumSum = 0
+  let totalSum = 0
+  for (let i = 1; i <= 8; i++) {
+    const applied = pt[`L${i}_applied_nitrogen`] as number
+    const length = pt[`L${i}_length`] as number
+    const contrib = (isNaN(applied) ? 0 : applied) * (isNaN(length) ? 2 : length)
+    if (i <= weekIndex) cumSum += contrib
+    totalSum += contrib
+  }
+  if (totalSum === 0) return 0
+  return totalN * (cumSum / totalSum)
 }
 
 // Fix Leaflet's default icon paths broken by webpack
@@ -27,9 +44,10 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 })
 
-function CanvasPoints({ points, activeLayer, min, max }: {
+function CanvasPoints({ points, activeLayer, weekFilter, min, max }: {
   points: FieldPoint[]
   activeLayer: string
+  weekFilter: number
   min: number
   max: number
 }) {
@@ -38,6 +56,7 @@ function CanvasPoints({ points, activeLayer, min, max }: {
   const renderer = useMemo(() => L.canvas({ padding: 0.5 }), [])
   const layer = findLayer(activeLayer)
   const inverted = layer?.colorDir === 'inverted'
+  const useWeekFilter = weekFilter > 0 && activeLayer === 'TOTAL_N_APPLIED_LB_AC'
 
   useEffect(() => {
     if (points.length === 0) return
@@ -60,7 +79,7 @@ function CanvasPoints({ points, activeLayer, min, max }: {
     layerRef.current = group
 
     points.forEach((pt) => {
-      const val = pt[activeLayer] as number
+      const val = useWeekFilter ? computeCumulativeN(pt, weekFilter) : pt[activeLayer] as number
       if (isNaN(val)) return
 
       const color = getColor(val, min, max, inverted)
@@ -77,7 +96,7 @@ function CanvasPoints({ points, activeLayer, min, max }: {
       circle.bindTooltip(
         `<div class="text-xs space-y-0.5">
           <div class="font-semibold">${layer?.label ?? activeLayer}</div>
-          <div>${isNaN(val) ? '—' : val.toFixed(3)} ${layer?.unit ?? ''}</div>
+          <div>${val.toFixed(3)} ${layer?.unit ?? ''}</div>
           <div class="text-gray-400 text-[10px]">Lat: ${pt.Latitude.toFixed(5)}, Lon: ${pt.Longitude.toFixed(5)}</div>
         </div>`,
         { className: 'ag-tooltip', sticky: true }
@@ -90,12 +109,12 @@ function CanvasPoints({ points, activeLayer, min, max }: {
       group.clearLayers()
       group.remove()
     }
-  }, [points, activeLayer, min, max, inverted, map, renderer, layer])
+  }, [points, activeLayer, weekFilter, useWeekFilter, min, max, inverted, map, renderer, layer])
 
   return null
 }
 
-export default function FieldMap({ activeLayer }: Props) {
+export default function FieldMap({ activeLayer, weekFilter }: Props) {
   const [points, setPoints] = useState<FieldPoint[]>([])
   const [geojson, setGeojson] = useState<object | null>(null)
   const [loading, setLoading] = useState(true)
@@ -118,12 +137,13 @@ export default function FieldMap({ activeLayer }: Props) {
   }, [])
 
   const { min, max } = useMemo(() => {
+    const useWeek = weekFilter > 0 && activeLayer === 'TOTAL_N_APPLIED_LB_AC'
     const vals = points
-      .map((p) => p[activeLayer] as number)
+      .map((p) => useWeek ? computeCumulativeN(p, weekFilter) : p[activeLayer] as number)
       .filter((v) => !isNaN(v) && isFinite(v))
     if (!vals.length) return { min: 0, max: 1 }
     return { min: Math.min(...vals), max: Math.max(...vals) }
-  }, [points, activeLayer])
+  }, [points, activeLayer, weekFilter])
 
   if (loading) {
     return (
@@ -171,7 +191,7 @@ export default function FieldMap({ activeLayer }: Props) {
           />
         )}
 
-        <CanvasPoints points={points} activeLayer={activeLayer} min={min} max={max} />
+        <CanvasPoints points={points} activeLayer={activeLayer} weekFilter={weekFilter} min={min} max={max} />
       </MapContainer>
 
       {/* Point count badge */}

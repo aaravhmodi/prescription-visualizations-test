@@ -1,10 +1,13 @@
 'use client'
 
 import { LAYER_GROUPS } from '@/lib/layers'
+import DateFilter from './DateFilter'
 
 interface Props {
   activeLayer: string
   onSelect: (id: string) => void
+  weekFilter: number
+  onWeekFilter: (week: number) => void
 }
 
 const GROUP_COLORS: Record<string, string> = {
@@ -23,7 +26,7 @@ const GROUP_HEADER_COLORS: Record<string, string> = {
   topology: 'text-violet-400 border-violet-800',
 }
 
-export default function LayerSidebar({ activeLayer, onSelect }: Props) {
+export default function LayerSidebar({ activeLayer, onSelect, weekFilter, onWeekFilter }: Props) {
   return (
     <aside className="w-56 flex-shrink-0 bg-gray-900 border-r border-gray-800 flex flex-col overflow-y-auto">
       <div className="px-4 py-3 border-b border-gray-800">
@@ -63,6 +66,8 @@ export default function LayerSidebar({ activeLayer, onSelect }: Props) {
           </div>
         ))}
       </div>
+
+      <DateFilter weekFilter={weekFilter} onChange={onWeekFilter} />
     </aside>
   )
 }
