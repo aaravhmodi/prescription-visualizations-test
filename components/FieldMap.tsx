@@ -76,19 +76,39 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null)
 
   useEffect(() => {
-    Promise.all([
-      fetch('/api/fielddata').then((r) => r.json()),
-      fetch('/api/geojson').then((r) => r.json()).catch(() => null),
-    ])
-      .then(([data, geo]) => {
-        setPoints(data)
-        if (geo && !geo.error) setGeojson(geo)
-        setLoading(false)
-      })
-      .catch((e: Error) => {
-        setError(e.message)
-        setLoading(false)
-      })
+    const FIELD_KEY = 'fielddata_v1'
+
+    async function loadData() {
+      // Use sessionStorage to avoid re-fetching the CSV JSON on every page reload
+      let fieldData: FieldPoint[] | null = null
+      try {
+        const cached = sessionStorage.getItem(FIELD_KEY)
+        if (cached) fieldData = JSON.parse(cached)
+      } catch {
+        // sessionStorage unavailable or quota exceeded — fall through to fetch
+      }
+
+      const [data, geo] = await Promise.all([
+        fieldData
+          ? Promise.resolve(fieldData)
+          : fetch('/api/fielddata')
+              .then((r) => r.json())
+              .then((d) => {
+                try { sessionStorage.setItem(FIELD_KEY, JSON.stringify(d)) } catch { /* quota exceeded */ }
+                return d
+              }),
+        fetch('/api/geojson').then((r) => r.json()).catch(() => null),
+      ])
+
+      setPoints(data)
+      if (geo && !geo.error) setGeojson(geo)
+      setLoading(false)
+    }
+
+    loadData().catch((e: Error) => {
+      setError(e.message)
+      setLoading(false)
+    })
   }, [])
 
   const layer = findLayer(activeLayer)

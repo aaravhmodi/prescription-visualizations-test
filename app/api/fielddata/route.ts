@@ -3,6 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import Papa from 'papaparse'
 
+// Parsed once per server process — avoids re-reading/re-parsing 309 MB on every request
+let rowCache: Record<string, number | string>[] | null = null
+
 const NEEDED_COLS = [
   'fid',
   'Latitude',
@@ -55,7 +58,15 @@ const NEEDED_COLS = [
   'L8_applied_nitrogen', 'L8_length',
 ]
 
+const CACHE_HEADERS = {
+  'Cache-Control': 'public, max-age=3600, stale-while-revalidate=86400',
+}
+
 export async function GET() {
+  if (rowCache) {
+    return NextResponse.json(rowCache, { headers: CACHE_HEADERS })
+  }
+
   const csvPath = path.join(process.cwd(), 'Christies.csv')
 
   if (!fs.existsSync(csvPath)) {
@@ -69,7 +80,7 @@ export async function GET() {
     skipEmptyLines: true,
   })
 
-  const rows = result.data
+  rowCache = result.data
     .filter((row) => {
       const lat = parseFloat(row['Latitude'])
       const lng = parseFloat(row['Longitude'])
@@ -89,5 +100,5 @@ export async function GET() {
       return out
     })
 
-  return NextResponse.json(rows)
+  return NextResponse.json(rowCache, { headers: CACHE_HEADERS })
 }
