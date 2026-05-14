@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
 import L from 'leaflet'
+import type * as GeoJSONTypes from 'geojson'
 import 'leaflet/dist/leaflet.css'
 import { getColor } from '@/lib/colorScale'
 import { findLayer } from '@/lib/layers'
@@ -181,7 +182,7 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
         {geojson && (
           <GeoJSON
             key="boundary"
-            data={geojson as Parameters<typeof L.geoJSON>[0]}
+            data={geojson as GeoJSONTypes.GeoJsonObject}
             style={{
               color: '#52b788',
               weight: 1.5,

@@ -1,9 +1,35 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      target: dev
     ports:
-      - "3000:3000"
+      - "3001:3000"
+    environment:
+      - WATCHPACK_POLLING=true
+      - HOSTNAME=0.0.0.0
     volumes:
       - ./Christies.csv:/app/Christies.csv:ro
       - ./ChristiesMAP.geojson:/app/ChristiesMAP.geojson:ro
+    develop:
+      watch:
+        - action: sync
+          path: ./app
+          target: /app/app
+          ignore:
+            - node_modules/
+        - action: sync
+          path: ./components
+          target: /app/components
+          ignore:
+            - node_modules/
+        - action: sync
+          path: ./lib
+          target: /app/lib
+          ignore:
+            - node_modules/
+        - action: rebuild
+          path: package.json
+        - action: rebuild
+          path: package-lock.json
     restart: unless-stopped
