@@ -1,10 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { MapContainer, TileLayer, GeoJSON, useMap } from 'react-leaflet'
-import L from 'leaflet'
-import type * as GeoJSONTypes from 'geojson'
-import 'leaflet/dist/leaflet.css'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Map, { Layer, Popup, Source } from 'react-map-gl/mapbox'
+import type { LayerProps, MapRef } from 'react-map-gl/mapbox'
+import type { MapMouseEvent } from 'mapbox-gl'
+import type { ExpressionSpecification } from 'mapbox-gl'
+import type { FeatureCollection, GeoJsonProperties, Point } from 'geojson'
+import 'mapbox-gl/dist/mapbox-gl.css'
 import { getColor } from '@/lib/colorScale'
 import { findLayer } from '@/lib/layers'
 import Legend from './Legend'
@@ -20,6 +22,16 @@ interface Props {
   activeLayer: string
   weekFilter: number
 }
+
+interface HoverInfo {
+  longitude: number
+  latitude: number
+  label: string
+  value: number
+  unit: string
+}
+
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN
 
 function computeCumulativeN(pt: FieldPoint, weekIndex: number): number {
   const totalN = pt['TOTAL_N_APPLIED_LB_AC'] as number
@@ -37,89 +49,31 @@ function computeCumulativeN(pt: FieldPoint, weekIndex: number): number {
   return totalN * (cumSum / totalSum)
 }
 
-// Fix Leaflet's default icon paths broken by webpack
-delete (L.Icon.Default.prototype as unknown as Record<string, unknown>)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-})
-
-function CanvasPoints({ points, activeLayer, weekFilter, min, max }: {
-  points: FieldPoint[]
-  activeLayer: string
-  weekFilter: number
-  min: number
-  max: number
-}) {
-  const map = useMap()
-  const layerRef = useRef<L.LayerGroup | null>(null)
-  const renderer = useMemo(() => L.canvas({ padding: 0.5 }), [])
-  const layer = findLayer(activeLayer)
-  const inverted = layer?.colorDir === 'inverted'
-  const useWeekFilter = weekFilter > 0 && activeLayer === 'TOTAL_N_APPLIED_LB_AC'
-
-  useEffect(() => {
-    if (points.length === 0) return
-    const lats = points.map((p) => p.Latitude)
-    const lngs = points.map((p) => p.Longitude)
-    const bounds = L.latLngBounds(
-      [Math.min(...lats), Math.min(...lngs)],
-      [Math.max(...lats), Math.max(...lngs)]
-    )
-    map.fitBounds(bounds, { padding: [20, 20] })
-  }, [points, map])
-
-  useEffect(() => {
-    if (layerRef.current) {
-      layerRef.current.clearLayers()
-      layerRef.current.remove()
-    }
-
-    const group = L.layerGroup().addTo(map)
-    layerRef.current = group
-
-    points.forEach((pt) => {
-      const val = useWeekFilter ? computeCumulativeN(pt, weekFilter) : pt[activeLayer] as number
-      if (isNaN(val)) return
-
-      const color = getColor(val, min, max, inverted)
-
-      const circle = L.circleMarker([pt.Latitude, pt.Longitude], {
-        renderer,
-        radius: 4,
-        fillColor: color,
-        fillOpacity: 0.85,
-        color: 'rgba(0,0,0,0.2)',
-        weight: 0.5,
-      })
-
-      circle.bindTooltip(
-        `<div class="text-xs space-y-0.5">
-          <div class="font-semibold">${layer?.label ?? activeLayer}</div>
-          <div>${val.toFixed(3)} ${layer?.unit ?? ''}</div>
-          <div class="text-gray-400 text-[10px]">Lat: ${pt.Latitude.toFixed(5)}, Lon: ${pt.Longitude.toFixed(5)}</div>
-        </div>`,
-        { className: 'ag-tooltip', sticky: true }
-      )
-
-      circle.addTo(group)
-    })
-
-    return () => {
-      group.clearLayers()
-      group.remove()
-    }
-  }, [points, activeLayer, weekFilter, useWeekFilter, min, max, inverted, map, renderer, layer])
-
-  return null
+function buildColorExpression(
+  min: number,
+  max: number,
+  inverted: boolean,
+  valueKey: string
+): ExpressionSpecification {
+  if (min === max) {
+    return ['literal', getColor(min, min, max, inverted)] as unknown as ExpressionSpecification
+  }
+  const steps = 10
+  const stops: (number | string)[] = []
+  for (let i = 0; i <= steps; i++) {
+    const v = min + (i / steps) * (max - min)
+    stops.push(v, getColor(v, min, max, inverted))
+  }
+  return ['interpolate', ['linear'], ['get', valueKey], ...stops] as unknown as ExpressionSpecification
 }
 
 export default function FieldMap({ activeLayer, weekFilter }: Props) {
+  const mapRef = useRef<MapRef>(null)
   const [points, setPoints] = useState<FieldPoint[]>([])
   const [geojson, setGeojson] = useState<object | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null)
 
   useEffect(() => {
     Promise.all([
@@ -131,20 +85,95 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
         if (geo && !geo.error) setGeojson(geo)
         setLoading(false)
       })
-      .catch((e) => {
+      .catch((e: Error) => {
         setError(e.message)
         setLoading(false)
       })
   }, [])
 
+  const layer = findLayer(activeLayer)
+  const inverted = layer?.colorDir === 'inverted'
+  const useWeek = weekFilter > 0 && activeLayer === 'TOTAL_N_APPLIED_LB_AC'
+
   const { min, max } = useMemo(() => {
-    const useWeek = weekFilter > 0 && activeLayer === 'TOTAL_N_APPLIED_LB_AC'
     const vals = points
-      .map((p) => useWeek ? computeCumulativeN(p, weekFilter) : p[activeLayer] as number)
+      .map((p) => (useWeek ? computeCumulativeN(p, weekFilter) : (p[activeLayer] as number)))
       .filter((v) => !isNaN(v) && isFinite(v))
     if (!vals.length) return { min: 0, max: 1 }
     return { min: Math.min(...vals), max: Math.max(...vals) }
-  }, [points, activeLayer, weekFilter])
+  }, [points, activeLayer, weekFilter, useWeek])
+
+  // Embed computed value as __val on each feature for GL expressions
+  const pointsGeoJSON = useMemo<FeatureCollection<Point, GeoJsonProperties>>(() => ({
+    type: 'FeatureCollection',
+    features: points
+      .map((pt) => {
+        const val = useWeek ? computeCumulativeN(pt, weekFilter) : (pt[activeLayer] as number)
+        if (isNaN(val) || !isFinite(val)) return null
+        return {
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: [pt.Longitude, pt.Latitude] },
+          properties: { ...pt, __val: val },
+        }
+      })
+      .filter(Boolean) as FeatureCollection<Point, GeoJsonProperties>['features'],
+  }), [points, activeLayer, weekFilter, useWeek])
+
+  const colorExpr = useMemo(
+    () => buildColorExpression(min, max, inverted, '__val'),
+    [min, max, inverted]
+  )
+
+  const circleLayer: LayerProps = {
+    id: 'field-points',
+    type: 'circle',
+    paint: {
+      'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6, 20, 10] as ExpressionSpecification,
+      'circle-color': colorExpr,
+      'circle-opacity': 0.88,
+      'circle-stroke-width': 0.5,
+      'circle-stroke-color': 'rgba(0,0,0,0.25)',
+    },
+  }
+
+  const boundaryLine: LayerProps = {
+    id: 'boundary-line',
+    type: 'line',
+    paint: {
+      'line-color': '#52b788',
+      'line-width': 1.5,
+      'line-dasharray': [3, 2],
+    },
+  }
+
+  // Fit map to field points once loaded
+  useEffect(() => {
+    if (!mapRef.current || points.length === 0) return
+    const lats = points.map((p) => p.Latitude)
+    const lngs = points.map((p) => p.Longitude)
+    mapRef.current.fitBounds(
+      [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+      { padding: 40, duration: 800 }
+    )
+  }, [points])
+
+  const onMouseEnter = useCallback(
+    (e: MapMouseEvent & { features?: GeoJSON.Feature[] }) => {
+      const feat = e.features?.[0]
+      if (!feat) return
+      const val = feat.properties?.__val as number
+      setHoverInfo({
+        longitude: e.lngLat.lng,
+        latitude: e.lngLat.lat,
+        label: layer?.label ?? activeLayer,
+        value: val,
+        unit: layer?.unit ?? '',
+      })
+    },
+    [layer, activeLayer]
+  )
+
+  const onMouseLeave = useCallback(() => setHoverInfo(null), [])
 
   if (loading) {
     return (
@@ -152,6 +181,19 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
         <div className="text-center space-y-3">
           <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
           <p className="text-gray-400 text-sm">Loading field data…</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (!MAPBOX_TOKEN) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-gray-950 p-6">
+        <div className="text-center space-y-3">
+          <p className="text-white text-sm font-semibold">Mapbox access token is missing.</p>
+          <p className="text-gray-400 text-xs max-w-sm">
+            Add <code className="bg-gray-900 px-1 rounded">NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN</code> to your environment and restart the app.
+          </p>
         </div>
       </div>
     )
@@ -167,37 +209,52 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
 
   return (
     <div className="flex-1 relative">
-      <MapContainer
-        center={[44.44, -81.19]}
-        zoom={14}
-        style={{ height: '100%', width: '100%', background: '#111' }}
-        zoomControl={false}
+      <Map
+        ref={mapRef}
+        initialViewState={{ longitude: -81.19, latitude: 44.44, zoom: 14 }}
+        style={{ width: '100%', height: '100%' }}
+        mapStyle="mapbox://styles/mapbox/satellite-streets-v12"
+        mapboxAccessToken={MAPBOX_TOKEN}
+        interactiveLayerIds={['field-points']}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
-        <TileLayer
-          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-          attribution='&copy; <a href="https://carto.com/">CARTO</a>'
-          maxZoom={20}
-        />
-
+        {/* Field boundary */}
         {geojson && (
-          <GeoJSON
-            key="boundary"
-            data={geojson as GeoJSONTypes.GeoJsonObject}
-            style={{
-              color: '#52b788',
-              weight: 1.5,
-              fillOpacity: 0,
-              dashArray: '4',
-            }}
-          />
+          <Source id="boundary" type="geojson" data={geojson as FeatureCollection}>
+            <Layer {...boundaryLine} />
+          </Source>
         )}
 
-        <CanvasPoints points={points} activeLayer={activeLayer} weekFilter={weekFilter} min={min} max={max} />
-      </MapContainer>
+        {/* Data points */}
+        <Source id="field-points" type="geojson" data={pointsGeoJSON}>
+          <Layer {...circleLayer} />
+        </Source>
+
+        {/* Hover tooltip */}
+        {hoverInfo && (
+          <Popup
+            longitude={hoverInfo.longitude}
+            latitude={hoverInfo.latitude}
+            closeButton={false}
+            closeOnClick={false}
+            anchor="bottom"
+            offset={12}
+          >
+            <div className="text-xs space-y-0.5 bg-gray-900 text-white px-2 py-1.5 rounded shadow-lg">
+              <div className="font-semibold text-emerald-400">{hoverInfo.label}</div>
+              <div>{hoverInfo.value.toFixed(3)} {hoverInfo.unit}</div>
+              <div className="text-gray-400 text-[10px]">
+                {hoverInfo.latitude.toFixed(5)}, {hoverInfo.longitude.toFixed(5)}
+              </div>
+            </div>
+          </Popup>
+        )}
+      </Map>
 
       {/* Point count badge */}
-      <div className="absolute top-3 right-3 z-[500] bg-gray-900/90 border border-gray-700 rounded px-2 py-1 text-xs text-gray-400">
-        {points.length.toLocaleString()} points
+      <div className="absolute top-3 right-3 z-[500] bg-gray-900/90 border border-gray-700 rounded px-2 py-1 text-xs text-gray-400 pointer-events-none">
+        {pointsGeoJSON.features.length.toLocaleString()} points
       </div>
 
       {/* Legend overlay */}
