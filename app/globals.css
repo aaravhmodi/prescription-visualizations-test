@@ -1,0 +1,33 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #030712;
+  color: #f9fafb;
+}
+
+/* Leaflet tooltip styling */
+.ag-tooltip {
+  background: rgba(17, 24, 39, 0.97) !important;
+  border: 1px solid rgba(75, 85, 99, 0.8) !important;
+  border-radius: 6px !important;
+  color: #e5e7eb !important;
+  font-family: ui-monospace, monospace !important;
+  font-size: 11px !important;
+  padding: 6px 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+}
+
+.ag-tooltip::before {
+  display: none !important;
+}
+
+/* Fix leaflet tile layer z-index */
+.leaflet-tile-pane {
+  opacity: 0.95;
+}
