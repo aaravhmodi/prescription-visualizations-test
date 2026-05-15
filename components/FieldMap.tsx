@@ -76,39 +76,31 @@ export default function FieldMap({ activeLayer, weekFilter }: Props) {
   const [hoverInfo, setHoverInfo] = useState<HoverInfo | null>(null)
 
   useEffect(() => {
-    const FIELD_KEY = 'fielddata_v1'
-
-    async function loadData() {
-      // Use sessionStorage to avoid re-fetching the CSV JSON on every page reload
-      let fieldData: FieldPoint[] | null = null
-      try {
-        const cached = sessionStorage.getItem(FIELD_KEY)
-        if (cached) fieldData = JSON.parse(cached)
-      } catch {
-        // sessionStorage unavailable or quota exceeded — fall through to fetch
-      }
-
-      const [data, geo] = await Promise.all([
-        fieldData
-          ? Promise.resolve(fieldData)
-          : fetch('/api/fielddata')
-              .then((r) => r.json())
-              .then((d) => {
-                try { sessionStorage.setItem(FIELD_KEY, JSON.stringify(d)) } catch { /* quota exceeded */ }
-                return d
-              }),
-        fetch('/api/geojson').then((r) => r.json()).catch(() => null),
-      ])
-
-      setPoints(data)
-      if (geo && !geo.error) setGeojson(geo)
+    async function loadPoints() {
+      const fieldRaw = await fetch('/fielddata.json').then((r) => r.json())
+      const { cols, rows } = fieldRaw as { cols: string[]; rows: (number | string | null)[][] }
+      const points: FieldPoint[] = rows.map((row) => {
+        const pt: Record<string, number | string> = {}
+        for (let i = 0; i < cols.length; i++) {
+          pt[cols[i]] = row[i] === null ? NaN : (row[i] as number | string)
+        }
+        return pt as FieldPoint
+      })
+      setPoints(points)
       setLoading(false)
     }
 
-    loadData().catch((e: Error) => {
+    async function loadBoundary() {
+      const geo = await fetch('/api/geojson').then((r) => r.json()).catch(() => null)
+      if (geo && !geo.error) setGeojson(geo)
+    }
+
+    loadPoints().catch((e: Error) => {
       setError(e.message)
       setLoading(false)
     })
+
+    loadBoundary()
   }, [])
 
   const layer = findLayer(activeLayer)
